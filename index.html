@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Экраны — пульт</title>
+<style>
+  :root{--bg:#0f1720;--panel:#182534;--line:#243449;--text:#eef4f8;--muted:#93a7ba;
+        --accent:#1c7ed6;--accent2:#1971c2;--green:#37b24d;--red:#e03131;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:"Segoe UI",system-ui,Arial,sans-serif}
+  button{font-family:inherit;cursor:pointer}
+  /* Вход */
+  #login{min-height:100%;display:flex;align-items:center;justify-content:center;padding:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;
+    padding:30px;width:100%;max-width:380px;box-shadow:0 18px 50px rgba(0,0,0,.4)}
+  .card h1{margin:0 0 18px;font-size:22px}
+  .card input{width:100%;padding:13px;margin:6px 0;border-radius:10px;border:1px solid var(--line);
+    background:#0c1420;color:var(--text);font-size:15px;outline:none}
+  .card input:focus{border-color:var(--accent)}
+  .card button{width:100%;margin-top:12px;padding:14px;border:0;border-radius:10px;
+    background:var(--accent);color:#fff;font-size:16px;font-weight:600}
+  .err{color:#ff8787;font-size:14px;min-height:18px;margin-top:8px}
+  /* Пульт */
+  #app{display:none;height:100vh;grid-template-columns:320px 1fr}
+  .side{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .side .top{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .side .top b{flex:1}
+  .side .top button{background:transparent;border:1px solid var(--line);color:var(--muted);
+    border-radius:8px;padding:6px 10px;font-size:13px}
+  .list{overflow:auto;flex:1;padding:8px}
+  .dev{padding:12px;border-radius:12px;border:1px solid transparent;cursor:pointer;margin-bottom:6px}
+  .dev:hover{background:#0f1c2b}
+  .dev.sel{border-color:var(--accent);background:#0f1c2b}
+  .dev .row1{display:flex;align-items:center;gap:8px}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+  .dot.on{background:var(--green)}
+  .dev .name{font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dev .acts{margin-top:8px;display:flex;gap:6px}
+  .dev .acts button{flex:1;background:#0c1420;border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:7px;font-size:12px}
+  .dev .acts button:hover{border-color:var(--accent)}
+  .main{display:flex;flex-direction:column;min-width:0;background:#000}
+  .bar{background:#0c1420;border-bottom:1px solid var(--line);padding:10px 16px;
+    display:flex;align-items:center;gap:12px}
+  .bar .title{flex:1;font-size:15px}
+  .bar button{background:var(--accent);border:0;color:#fff;border-radius:9px;padding:10px 16px;font-weight:600}
+  .bar button:disabled{opacity:.5}
+  .view{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:10px}
+  .view img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+  .hint{color:var(--muted);text-align:center;padding:40px;line-height:1.5}
+</style>
+</head>
+<body>
+<!-- ====== ВСТАВЬТЕ СВОИ ЗНАЧЕНИЯ ====== -->
+<script>
+  const SUPABASE_URL      = "https://rpaofnhcmtxmmolmtkao.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_gy47XtlxEKTvkBrwGBCeCw_f_c6SMqz";
+</script>
+
+<div id="login">
+  <form class="card" id="loginForm">
+    <h1>Вход в пульт экранов</h1>
+    <input id="email" type="email" placeholder="Почта администратора" autocomplete="username">
+    <input id="password" type="password" placeholder="Пароль" autocomplete="current-password">
+    <button type="submit">Войти</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<div id="app">
+  <div class="side">
+    <div class="top"><b>Компьютеры</b>
+      <button id="refreshBtn">Обновить</button>
+      <button id="logoutBtn">Выйти</button>
+    </div>
+    <div class="list" id="list"></div>
+  </div>
+  <div class="main">
+    <div class="bar">
+      <div class="title" id="curTitle">Выберите компьютер слева</div>
+      <button id="snapBtn" disabled>📸 Снять экран</button>
+    </div>
+    <div class="view" id="view"><div class="hint">Здесь появится снимок экрана выбранного компьютера.</div></div>
+  </div>
+</div>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const $ = id => document.getElementById(id);
+let devices = [], selected = null;
+
+// ---- Вход ----
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('loginErr').textContent = 'Вход...';
+  const { error } = await sb.auth.signInWithPassword({
+    email: $('email').value.trim(), password: $('password').value });
+  if (error) { $('loginErr').textContent = 'Не удалось войти: ' + error.message; return; }
+  showApp();
+});
+$('logoutBtn').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
+$('refreshBtn').addEventListener('click', loadDevices);
+
+async function showApp(){
+  $('login').style.display = 'none';
+  $('app').style.display = 'grid';
+  await loadDevices();
+  sb.channel('devices-live')
+    .on('postgres_changes', { event:'*', schema:'public', table:'devices' }, loadDevices)
+    .subscribe();
+  setInterval(loadDevices, 8000); // запасное обновление статусов
+}
+
+function isOnline(d){ return d.last_seen && (Date.now() - new Date(d.last_seen)) < 30000; }
+
+async function loadDevices(){
+  const { data, error } = await sb.from('devices').select('*').order('name');
+  if (error) return;
+  devices = data || [];
+  renderList();
+  if (selected){ const s = devices.find(d=>d.id===selected.id); if (s){ selected = s; maybeShowShot(s); } }
+}
+
+function renderList(){
+  const el = $('list'); el.innerHTML = '';
+  if (!devices.length){ el.innerHTML = '<div class="hint">Пока нет ни одного компьютера.<br>Установите агент на ПК.</div>'; return; }
+  for (const d of devices){
+    const div = document.createElement('div');
+    div.className = 'dev' + (selected && selected.id===d.id ? ' sel':'');
+    div.innerHTML = `<div class="row1"><span class="dot ${isOnline(d)?'on':''}"></span>
+        <span class="name"></span></div>
+      <div class="acts">
+        <button data-a="ren">✏️ Имя</button>
+        <button data-a="del">🗑 Удалить</button>
+      </div>`;
+    div.querySelector('.name').textContent = d.name;
+    div.addEventListener('click', (e)=>{ if(e.target.dataset.a) return; select(d); });
+    div.querySelector('[data-a="ren"]').addEventListener('click', ()=>renameDevice(d));
+    div.querySelector('[data-a="del"]').addEventListener('click', ()=>deleteDevice(d));
+    el.appendChild(div);
+  }
+}
+
+function select(d){
+  selected = d;
+  renderList();
+  $('curTitle').textContent = d.name + (isOnline(d)?' — в сети':' — не в сети');
+  $('snapBtn').disabled = false;
+  $('view').innerHTML = '<div class="hint">Нажмите «Снять экран».</div>';
+  lastShotShown = null;
+  maybeShowShot(d);
+}
+
+let lastShotShown = null;
+async function maybeShowShot(d){
+  if (!d.latest_shot || !d.latest_shot_at) return;
+  if (lastShotShown === d.latest_shot_at) return;
+  lastShotShown = d.latest_shot_at;
+  const { data, error } = await sb.storage.from('shots').createSignedUrl(d.latest_shot, 120);
+  if (error) return;
+  const t = new Date(d.latest_shot_at).toLocaleTimeString();
+  $('view').innerHTML = '';
+  const img = new Image(); img.src = data.signedUrl; $('view').appendChild(img);
+  $('curTitle').textContent = d.name + ' · снимок ' + t;
+}
+
+$('snapBtn').addEventListener('click', async ()=>{
+  if (!selected) return;
+  $('snapBtn').disabled = true;
+  $('view').innerHTML = '<div class="hint">Запрос отправлен, ждём снимок...</div>';
+  const { error } = await sb.from('requests').insert({ device_id: selected.id });
+  setTimeout(()=>{ $('snapBtn').disabled = false; }, 2000);
+  if (error) $('view').innerHTML = '<div class="hint">Ошибка запроса: '+error.message+'</div>';
+});
+
+async function renameDevice(d){
+  const name = prompt('Новое имя компьютера:', d.name);
+  if (name===null) return;
+  await sb.from('devices').update({ name: name.trim() || d.name }).eq('id', d.id);
+  loadDevices();
+}
+async function deleteDevice(d){
+  if (!confirm('Удалить «'+d.name+'» из списка?')) return;
+  await sb.from('devices').delete().eq('id', d.id);
+  if (selected && selected.id===d.id){ selected=null; $('curTitle').textContent='Выберите компьютер слева'; $('snapBtn').disabled=true; $('view').innerHTML=''; }
+  loadDevices();
+}
+
+// автологин, если сессия жива
+(async ()=>{ const { data } = await sb.auth.getSession(); if (data.session) showApp(); })();
+</script>
+</body>
+</html>
